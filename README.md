@@ -10,7 +10,7 @@ This repository is intentionally starting with a small, solid core:
 - typed tags and value access
 - transfer syntax classification
 - pluggable codec registry
-- de-identification planning
+- de-identification profiles, deterministic UID remapping, and audit reports
 - pixel metadata and safety checks
 - VOI window, rescale, and photometric interpretation helpers
 - async networking primitives for association lifecycle and DIMSE-style commands
@@ -75,6 +75,31 @@ dataset = read("image.dcm", stop_before_pixels=True)
 print(dataset.get("PatientName"))
 ```
 
+Basic de-identification:
+
+```python
+from dicomforge import AnonymizationPlan, DicomDataset, PrivateTagAction
+
+dataset = DicomDataset(
+    {
+        "PatientName": "Ada Lovelace",
+        "PatientID": "MRN-123",
+        "StudyInstanceUID": "1.2.826.0.1.3680043.8.498.1",
+        (0x0011, 0x1001): "private vendor value",
+    }
+)
+
+plan = AnonymizationPlan.starter_profile(
+    uid_salt="project-specific-secret",
+    private_tag_action=PrivateTagAction.REMOVE,
+)
+report = plan.apply_with_report(dataset)
+
+assert dataset.get("PatientName") == "Anonymous"
+assert dataset.get("PatientIdentityRemoved") == "YES"
+assert report.private_tags_removed == 1
+```
+
 Async networking:
 
 ```python
@@ -90,6 +115,19 @@ async with DimseServer(ae_title="LOCAL-SCP") as server:
         assert status.is_success
 ```
 
+## De-identification Scope
+
+DICOMForge implements a practical, conservative subset of the DICOM PS3.15
+Basic Application Level Confidentiality Profile for non-pixel attributes:
+common patient, accession, date/time, institution, operator, and UID fields are
+removed, emptied, replaced, or deterministically remapped. Private tag handling
+is explicit and defaults to removal. `remove_private_tags` on `apply` and
+`apply_with_report` remains available as a per-call override for older callers.
+
+This is a software library, not a compliance certificate. Production use should
+pair it with site-specific policy, legal review, image pixel review, and a risk
+assessment for the data release context.
+
 ## Development
 
 Run the standard-library test suite:
@@ -98,4 +136,17 @@ Run the standard-library test suite:
 PYTHONPATH=src python3 -m unittest
 ```
 
+Optional checks used by maintainers when development dependencies are installed:
+
+```bash
+python -m ruff check src tests
+python -m mypy src/dicomforge
+python -m compileall -q src tests
+```
+
 Examples live in [examples](examples).
+
+## License
+
+DICOMForge is distributed under the MIT License for personal and commercial
+use. See [LICENSE](LICENSE).

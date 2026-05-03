@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
+import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from hashlib import sha256
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from dicomforge.dataset import DicomDataset
 from dicomforge.tags import Tag, TagInput
@@ -16,6 +17,12 @@ class AnonymizationAction(str, Enum):
     EMPTY = "empty"
     REPLACE = "replace"
     REMAP_UID = "remap_uid"
+    UID_REMAP = "remap_uid"
+
+
+class PrivateTagAction(str, Enum):
+    REMOVE = "remove"
+    KEEP = "keep"
 
 
 @dataclass(frozen=True)
@@ -27,10 +34,13 @@ class Rule:
 
 @dataclass(frozen=True)
 class AnonymizationEvent:
-    """One applied de-identification action."""
+    """One de-identification action that was applied or skipped."""
 
     tag: Tag
     action: AnonymizationAction
+    before_present: bool
+    after_present: bool
+    replacement: object = ""
     path: Tuple[Tag, ...] = ()
     previous_value: object = None
     new_value: object = None
@@ -39,6 +49,9 @@ class AnonymizationEvent:
         return {
             "tag": str(self.tag),
             "action": self.action.value,
+            "before_present": self.before_present,
+            "after_present": self.after_present,
+            "replacement": self.replacement,
             "path": [str(tag) for tag in self.path],
             "previous_value": self.previous_value,
             "new_value": self.new_value,
@@ -47,50 +60,110 @@ class AnonymizationEvent:
 
 @dataclass(frozen=True)
 class AnonymizationReport:
-    """Audit report returned after applying a de-identification plan."""
+    """Summary of a de-identification run."""
 
-    events: Tuple[AnonymizationEvent, ...]
-    private_tags_removed: int = 0
+    events: Sequence[AnonymizationEvent]
+    private_tags_removed: int
+    private_tag_action: PrivateTagAction = PrivateTagAction.REMOVE
 
     def to_dict(self) -> dict[str, object]:
         return {
             "events": [event.to_dict() for event in self.events],
             "private_tags_removed": self.private_tags_removed,
+            "private_tag_action": self.private_tag_action.value,
         }
 
 
+AuditEvent = AnonymizationEvent
+AuditReport = AnonymizationReport
+
+
 class UidRemapper:
-    """Deterministically map DICOM UIDs into an organizational root."""
+    """Deterministically replace UIDs while preserving equality relationships."""
 
     def __init__(self, root: str = "2.25", *, salt: str = "dicomforge") -> None:
-        normalized = root.strip().rstrip(".")
-        if not normalized or len(normalized) > 54:
-            raise ValueError("UID root must be non-empty and at most 54 characters.")
-        self.root = normalized
+        normalized_root = root.strip().rstrip(".")
+        if not _UID_ROOT_PATTERN.match(normalized_root) or len(normalized_root) > 60:
+            raise ValueError(
+                "UID root must contain numeric components separated by dots and leave room "
+                "for a generated suffix."
+            )
+        self.root = normalized_root
         self.salt = salt
         self._cache: Dict[str, str] = {}
 
     def remap(self, uid: object) -> str:
-        source = str(uid).strip()
-        if not source:
+        original = str(uid).strip()
+        if not original:
             return ""
-        existing = self._cache.get(source)
-        if existing is not None:
-            return existing
-        digest = hashlib.sha256(f"{self.salt}:{source}".encode("utf-8")).digest()
-        numeric = str(int.from_bytes(digest[:15], "big"))
-        max_suffix = 64 - len(self.root) - 1
-        remapped = f"{self.root}.{numeric[:max_suffix]}"
-        self._cache[source] = remapped
+        cached = self._cache.get(original)
+        if cached is not None:
+            return cached
+        digest = sha256(f"{self.salt}\0{original}".encode("utf-8")).digest()
+        suffix = str(int.from_bytes(digest[:16], "big"))
+        available = 64 - len(self.root) - 1
+        remapped = f"{self.root}.{suffix[:available]}"
+        self._cache[original] = remapped
         return remapped
+
+
+_UID_TAGS = (
+    Tag.StudyInstanceUID,
+    Tag.SeriesInstanceUID,
+    Tag.SOPInstanceUID,
+    Tag.FrameOfReferenceUID,
+)
+
+_BASIC_PROFILE_RULES = (
+    Rule(Tag.PatientName, AnonymizationAction.REPLACE, "Anonymous"),
+    Rule(Tag.PatientID, AnonymizationAction.REPLACE, "ANON"),
+    Rule(Tag.PatientBirthDate, AnonymizationAction.EMPTY),
+    Rule(Tag.PatientSex, AnonymizationAction.EMPTY),
+    Rule(Tag.PatientAddress, AnonymizationAction.DELETE),
+    Rule(Tag.PatientTelephoneNumbers, AnonymizationAction.DELETE),
+    Rule(Tag.OtherPatientIDs, AnonymizationAction.DELETE),
+    Rule(Tag.PatientAge, AnonymizationAction.EMPTY),
+    Rule(Tag.AccessionNumber, AnonymizationAction.EMPTY),
+    Rule(Tag.StudyDate, AnonymizationAction.EMPTY),
+    Rule(Tag.SeriesDate, AnonymizationAction.EMPTY),
+    Rule(Tag.AcquisitionDate, AnonymizationAction.EMPTY),
+    Rule(Tag.ContentDate, AnonymizationAction.EMPTY),
+    Rule(Tag.StudyTime, AnonymizationAction.EMPTY),
+    Rule(Tag.SeriesTime, AnonymizationAction.EMPTY),
+    Rule(Tag.AcquisitionTime, AnonymizationAction.EMPTY),
+    Rule(Tag.ContentTime, AnonymizationAction.EMPTY),
+    Rule(Tag.InstitutionName, AnonymizationAction.EMPTY),
+    Rule(Tag.InstitutionAddress, AnonymizationAction.DELETE),
+    Rule(Tag.ReferringPhysicianName, AnonymizationAction.EMPTY),
+    Rule(Tag.PerformingPhysicianName, AnonymizationAction.EMPTY),
+    Rule(Tag.OperatorsName, AnonymizationAction.EMPTY),
+    Rule(Tag.StationName, AnonymizationAction.EMPTY),
+    Rule(Tag.StudyID, AnonymizationAction.EMPTY),
+    Rule(Tag.LongitudinalTemporalInformationModified, AnonymizationAction.REPLACE, "REMOVED"),
+    Rule(Tag.PatientIdentityRemoved, AnonymizationAction.REPLACE, "YES"),
+    Rule(
+        Tag.DeidentificationMethod,
+        AnonymizationAction.REPLACE,
+        "DICOMForge Basic Application Confidentiality Profile subset",
+    ),
+)
+
+_ALWAYS_SET_TAGS = frozenset(
+    {
+        Tag.LongitudinalTemporalInformationModified,
+        Tag.PatientIdentityRemoved,
+        Tag.DeidentificationMethod,
+    }
+)
+
+_UID_ROOT_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 
 
 class AnonymizationPlan:
     """A deterministic de-identification plan that can be audited before use.
 
-    The built-in profile is intentionally small. It is a starter policy for
-    common direct identifiers, not a complete DICOM PS3.15 Basic Application
-    Confidentiality Profile implementation.
+    The built-in profile is a practical subset for common non-pixel identifiers,
+    not a complete DICOM PS3.15 Basic Application Confidentiality Profile.
     """
 
     def __init__(
@@ -98,67 +171,58 @@ class AnonymizationPlan:
         rules: Iterable[Rule],
         *,
         uid_remapper: Optional[UidRemapper] = None,
+        private_tag_action: PrivateTagAction = PrivateTagAction.REMOVE,
     ) -> None:
         self._rules = list(rules)
-        self.uid_remapper = uid_remapper or UidRemapper()
+        self._uid_remapper = uid_remapper or UidRemapper()
+        self._private_tag_action = private_tag_action
 
     @classmethod
     def starter_profile(
         cls,
         replacements: Optional[Mapping[TagInput, object]] = None,
+        *,
         uid_root: str = "2.25",
         uid_salt: str = "dicomforge",
+        private_tag_action: PrivateTagAction = PrivateTagAction.REMOVE,
     ) -> "AnonymizationPlan":
         replacement_map: Dict[Tag, object] = {
             Tag.parse(tag): value for tag, value in (replacements or {}).items()
         }
-        default_rules = [
-            Rule(Tag.PatientName, AnonymizationAction.REPLACE, "Anonymous"),
-            Rule(Tag.PatientID, AnonymizationAction.REPLACE, "ANON"),
-            Rule(Tag.AccessionNumber, AnonymizationAction.EMPTY),
-            Rule(Tag.PatientBirthDate, AnonymizationAction.EMPTY),
-            Rule(Tag.PatientSex, AnonymizationAction.EMPTY),
-            Rule(Tag.PatientAddress, AnonymizationAction.DELETE),
-            Rule(Tag.ReferringPhysicianName, AnonymizationAction.EMPTY),
-            Rule(Tag.InstitutionName, AnonymizationAction.EMPTY),
-            Rule(Tag.StudyDate, AnonymizationAction.EMPTY),
-            Rule(Tag.SeriesDate, AnonymizationAction.EMPTY),
-            Rule(Tag.AcquisitionDate, AnonymizationAction.EMPTY),
-            Rule(Tag.ContentDate, AnonymizationAction.EMPTY),
-            Rule(Tag.StudyInstanceUID, AnonymizationAction.REMAP_UID),
-            Rule(Tag.SeriesInstanceUID, AnonymizationAction.REMAP_UID),
-            Rule(Tag.SOPInstanceUID, AnonymizationAction.REMAP_UID),
-        ]
         rules = [
             Rule(rule.tag, rule.action, replacement_map.get(rule.tag, rule.replacement))
-            for rule in default_rules
+            for rule in _BASIC_PROFILE_RULES
         ]
-        return cls(rules, uid_remapper=UidRemapper(uid_root, salt=uid_salt))
+        rules.extend(Rule(tag, AnonymizationAction.REMAP_UID) for tag in _UID_TAGS)
+        return cls(
+            rules,
+            uid_remapper=UidRemapper(root=uid_root, salt=uid_salt),
+            private_tag_action=private_tag_action,
+        )
 
     @classmethod
     def basic_profile(
         cls,
         replacements: Optional[Mapping[TagInput, object]] = None,
+        *,
         uid_root: str = "2.25",
         uid_salt: str = "dicomforge",
+        private_tag_action: PrivateTagAction = PrivateTagAction.REMOVE,
     ) -> "AnonymizationPlan":
-        """Compatibility alias for :meth:`starter_profile`.
-
-        The name is retained for older callers, but the profile is not a full
-        DICOM PS3.15 Basic Application Confidentiality Profile implementation.
-        """
+        """Compatibility alias for :meth:`starter_profile`."""
 
         return cls.starter_profile(
             replacements=replacements,
             uid_root=uid_root,
             uid_salt=uid_salt,
+            private_tag_action=private_tag_action,
         )
 
     def apply(
         self,
         dataset: DicomDataset,
         *,
-        remove_private_tags: bool = True,
+        remove_private_tags: Optional[bool] = None,
         recursive: bool = True,
     ) -> DicomDataset:
         self.apply_with_report(
@@ -172,15 +236,26 @@ class AnonymizationPlan:
         self,
         dataset: DicomDataset,
         *,
-        remove_private_tags: bool = True,
+        remove_private_tags: Optional[bool] = None,
         recursive: bool = True,
     ) -> AnonymizationReport:
         events: List[AnonymizationEvent] = []
         self._apply_to_dataset(dataset, events, path=(), recursive=recursive)
-        private_tags_removed = 0
-        if remove_private_tags:
-            private_tags_removed = dataset.remove_private_tags(recursive=recursive)
-        return AnonymizationReport(tuple(events), private_tags_removed)
+        should_remove_private = (
+            remove_private_tags
+            if remove_private_tags is not None
+            else self._private_tag_action == PrivateTagAction.REMOVE
+        )
+        private_tags_removed = (
+            dataset.remove_private_tags(recursive=recursive) if should_remove_private else 0
+        )
+        return AnonymizationReport(
+            events=tuple(events),
+            private_tags_removed=private_tags_removed,
+            private_tag_action=(
+                PrivateTagAction.REMOVE if should_remove_private else PrivateTagAction.KEEP
+            ),
+        )
 
     def _apply_to_dataset(
         self,
@@ -191,32 +266,30 @@ class AnonymizationPlan:
         recursive: bool,
     ) -> None:
         for rule in self._rules:
-            previous = dataset.get(rule.tag)
+            before_present = rule.tag in dataset
+            previous_value = dataset.get(rule.tag)
             if rule.action == AnonymizationAction.DELETE:
-                if rule.tag not in dataset:
-                    continue
-                dataset.pop(rule.tag, None)
-                new_value: Any = None
+                if before_present:
+                    dataset.pop(rule.tag, None)
             elif rule.action == AnonymizationAction.EMPTY:
-                dataset.set(rule.tag, "")
-                new_value = ""
+                if before_present:
+                    dataset.set(rule.tag, "")
             elif rule.action == AnonymizationAction.REPLACE:
-                dataset.set(rule.tag, rule.replacement)
-                new_value = rule.replacement
+                if before_present or rule.tag in _ALWAYS_SET_TAGS:
+                    dataset.set(rule.tag, rule.replacement)
             elif rule.action == AnonymizationAction.REMAP_UID:
-                if previous is None:
-                    continue
-                new_value = self.uid_remapper.remap(previous)
-                dataset.set(rule.tag, new_value)
-            else:
-                continue
+                if before_present:
+                    dataset.set(rule.tag, self._remap_value(dataset[rule.tag]))
             events.append(
                 AnonymizationEvent(
                     tag=rule.tag,
                     action=rule.action,
+                    before_present=before_present,
+                    after_present=rule.tag in dataset,
+                    replacement=self._audit_replacement(rule, dataset),
                     path=path,
-                    previous_value=previous,
-                    new_value=new_value,
+                    previous_value=previous_value,
+                    new_value=dataset.get(rule.tag),
                 )
             )
         if recursive:
@@ -229,6 +302,20 @@ class AnonymizationPlan:
             {"tag": str(rule.tag), "action": rule.action.value, "replacement": rule.replacement}
             for rule in self._rules
         ]
+
+    def _remap_value(self, value: Any) -> Any:
+        if isinstance(value, str):
+            return self._uid_remapper.remap(value)
+        if isinstance(value, tuple):
+            return tuple(self._uid_remapper.remap(item) for item in value)
+        if isinstance(value, list):
+            return [self._uid_remapper.remap(item) for item in value]
+        return self._uid_remapper.remap(value)
+
+    def _audit_replacement(self, rule: Rule, dataset: DicomDataset) -> object:
+        if rule.action == AnonymizationAction.REMAP_UID:
+            return dataset.get(rule.tag, "")
+        return rule.replacement
 
 
 def _iter_sequence_items(value: object) -> Iterable[DicomDataset]:
