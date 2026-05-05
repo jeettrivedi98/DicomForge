@@ -347,8 +347,8 @@ class DimseServer:
     async def start(self) -> None:
         if self._server is not None:
             return
-        self._store_worker = asyncio.create_task(self._run_store_worker())
         self._server = await asyncio.start_server(self._handle_connection, self.host, self.port)
+        self._store_worker = asyncio.create_task(self._run_store_worker())
 
     async def close(self) -> None:
         if self._server is not None:

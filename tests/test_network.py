@@ -16,8 +16,16 @@ from dicomforge.uids import DimseStatusCode, SopClassUID
 
 
 class NetworkingTests(unittest.IsolatedAsyncioTestCase):
+    async def start_server_or_skip(self, server):
+        try:
+            await server.start()
+        except PermissionError as exc:
+            self.skipTest(f"loopback socket binding is not available: {exc}")
+        return server
+
     async def test_association_lifecycle_and_c_echo(self):
-        async with DimseServer(ae_title="TEST-SCP") as server:
+        server = await self.start_server_or_skip(DimseServer(ae_title="TEST-SCP"))
+        async with server:
             association = await open_association(
                 "127.0.0.1",
                 server.bound_port,
@@ -35,7 +43,8 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
                 await association.c_echo()
 
     async def test_association_rejects_unknown_called_ae_title(self):
-        async with DimseServer(ae_title="KNOWN") as server:
+        server = await self.start_server_or_skip(DimseServer(ae_title="KNOWN"))
+        async with server:
             with self.assertRaisesRegex(AssociationRejectedError, "unknown AE title"):
                 await open_association(
                     "127.0.0.1",
@@ -44,10 +53,13 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_association_rejects_unsupported_sop_classes(self):
-        async with DimseServer(
-            ae_title="KNOWN",
-            supported_sop_classes=(SopClassUID.Verification,),
-        ) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(
+                ae_title="KNOWN",
+                supported_sop_classes=(SopClassUID.Verification,),
+            )
+        )
+        async with server:
             with self.assertRaisesRegex(
                 AssociationRejectedError,
                 "no supported presentation contexts",
@@ -77,7 +89,10 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
                 )
             ]
 
-        async with DimseServer(ae_title="FIND-SCP", find_handler=find_handler) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(ae_title="FIND-SCP", find_handler=find_handler)
+        )
+        async with server:
             async with await Association.connect(
                 "127.0.0.1",
                 server.bound_port,
@@ -98,7 +113,10 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
             seen["destination"] = destination
             return DimseStatus(0x0000, "Moved 2 instances")
 
-        async with DimseServer(ae_title="MOVE-SCP", move_handler=move_handler) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(ae_title="MOVE-SCP", move_handler=move_handler)
+        )
+        async with server:
             async with await open_association(
                 "127.0.0.1",
                 server.bound_port,
@@ -119,7 +137,10 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
             return DimseStatus.SUCCESS
 
         dataset = DicomDataset({Tag.SOPInstanceUID: "1.2.3.4", Tag.PixelData: b"\x00\x01"})
-        async with DimseServer(ae_title="STORE-SCP", store_handler=store_handler) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(ae_title="STORE-SCP", store_handler=store_handler)
+        )
+        async with server:
             async with await open_association(
                 "127.0.0.1",
                 server.bound_port,
@@ -142,11 +163,14 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
             await unblock.wait()
             return DimseStatus.SUCCESS
 
-        async with DimseServer(
-            ae_title="STORE-SCP",
-            store_handler=store_handler,
-            store_queue_size=1,
-        ) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(
+                ae_title="STORE-SCP",
+                store_handler=store_handler,
+                store_queue_size=1,
+            )
+        )
+        async with server:
             async with await open_association(
                 "127.0.0.1",
                 server.bound_port,
@@ -195,7 +219,10 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
             await unblock.wait()
             return DimseStatus.SUCCESS
 
-        async with DimseServer(ae_title="STORE-SCP", store_handler=store_handler) as server:
+        server = await self.start_server_or_skip(
+            DimseServer(ae_title="STORE-SCP", store_handler=store_handler)
+        )
+        async with server:
             association = await open_association(
                 "127.0.0.1",
                 server.bound_port,
@@ -221,7 +248,7 @@ class NetworkingTests(unittest.IsolatedAsyncioTestCase):
             return DimseStatus.SUCCESS
 
         server = DimseServer(ae_title="STORE-SCP", store_handler=store_handler)
-        await server.start()
+        await self.start_server_or_skip(server)
         association = await open_association(
             "127.0.0.1",
             server.bound_port,
