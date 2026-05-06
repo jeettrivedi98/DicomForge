@@ -99,3 +99,27 @@ Out of scope today:
 
 Full wire-compatible DIMSE support belongs in the planned `dicomforge-network`
 package, likely by integrating with `pynetdicom`.
+
+## DICOMweb
+
+`dicomforge.dicomweb` provides dependency-free helpers for DICOMweb API
+mechanics.
+
+Current scope:
+
+- QIDO-RS query parameter building
+- QIDO-RS study, series, and instance search client methods
+- WADO-RS study, series, instance, and study metadata retrieval methods
+- STOW-RS multipart upload body construction
+- DICOM JSON Model conversion for common values, person names, sequences, and
+  inline binary
+- multipart/related parsing for buffered response bodies
+- injectable transport protocol plus a standard-library `urllib` transport
+
+Out of scope today:
+
+- authentication helpers
+- retry and timeout policy beyond transport configuration
+- chunk-by-chunk response streaming from sockets
+- real PACS/VNA integration-test compatibility guarantees
+- complete DICOM JSON Model coverage for every VR edge case

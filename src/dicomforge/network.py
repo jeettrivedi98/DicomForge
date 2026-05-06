@@ -351,9 +351,9 @@ class DimseServer:
         self._store_worker = asyncio.create_task(self._run_store_worker())
 
     async def close(self) -> None:
+        server = self._server
         if self._server is not None:
             self._server.close()
-            await self._server.wait_closed()
             self._server = None
         for writer in list(self._connections):
             writer.close()
@@ -362,6 +362,8 @@ class DimseServer:
                 await writer.wait_closed()
             except (ConnectionError, OSError):
                 pass
+        if server is not None:
+            await server.wait_closed()
         if self._store_worker is not None:
             self._store_worker.cancel()
             try:

@@ -47,6 +47,11 @@ remains planned for `dicomforge-network`.
 
 ## 0.5 DICOMweb
 
+Status: implemented in `dicomforge.dicomweb` as dependency-free client,
+query, DICOM JSON, STOW multipart, and multipart parsing primitives with
+standard-library tests. Production auth/retry policies and PACS integration
+fixtures remain planned for optional transports.
+
 - QIDO-RS query builder
 - WADO-RS retrieval
 - STOW-RS upload

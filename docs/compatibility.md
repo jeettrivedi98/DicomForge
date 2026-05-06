@@ -27,4 +27,5 @@ DICOMForge is currently tested against the Python versions listed below.
 | Full DICOM PS3.15 de-identification | Planned |
 | Async command lifecycle tests | Implemented |
 | DICOM Upper Layer wire compatibility | Planned |
-| DICOMweb | Planned |
+| DICOMweb query/client/multipart helpers | Implemented |
+| DICOMweb integration-tested auth/retry transports | Planned |

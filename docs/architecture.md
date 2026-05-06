@@ -19,6 +19,7 @@ heavy capabilities are optional plugins.
   tag policy, and audit reports
 - `dicomforge.io`: optional backend-based file IO
 - `dicomforge.network`: dependency-free association and DIMSE-style command primitives
+- `dicomforge.dicomweb`: dependency-free DICOMweb URL, transport, JSON, and multipart helpers
 - `dicomforge.uids`: selected standard UID and DIMSE status constants
 
 ## De-identification stance
@@ -46,7 +47,7 @@ document the profile options used for each data release.
 - `dicomforge-pixels`: NumPy/Pillow pixel transforms and bulk array operations
 - `dicomforge-codecs-openjpeg`: JPEG 2000 codec bridge
 - `dicomforge-network`: full DICOM Upper Layer and DIMSE services
-- `dicomforge-dicomweb`: QIDO-RS, WADO-RS, STOW-RS client/server helpers
+- `dicomforge-dicomweb`: optional auth, retry, and integration-tested DICOMweb transports
 - `dicomforge-iods`: validated high-level IOD builders
 
 ## Lessons from existing libraries

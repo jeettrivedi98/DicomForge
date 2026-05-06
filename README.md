@@ -14,6 +14,7 @@ This repository is intentionally starting with a small, solid core:
 - pixel metadata and safety checks
 - VOI window, rescale, and photometric interpretation helpers
 - async networking primitives for association lifecycle and DIMSE-style commands
+- DICOMweb query, retrieval, upload, and multipart helpers
 - optional `pydicom` IO backend
 - standard-library tests
 
@@ -113,6 +114,18 @@ async with DimseServer(ae_title="LOCAL-SCP") as server:
     ) as association:
         status = await association.c_echo()
         assert status.is_success
+```
+
+DICOMweb query building:
+
+```python
+from dicomforge.dicomweb import DicomwebClient, QidoQuery, UrllibDicomwebTransport
+
+client = DicomwebClient(
+    "https://pacs.example/dicomweb",
+    UrllibDicomwebTransport(timeout=10),
+)
+studies = client.search_studies(QidoQuery().patient_id("MRN-123").modality("CT"))
 ```
 
 ## De-identification Scope
