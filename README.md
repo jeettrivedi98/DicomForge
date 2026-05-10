@@ -53,6 +53,46 @@ de-identification engine, or wire-compatible DIMSE implementation. See
 and [docs/compatibility.md](docs/compatibility.md) before using it in regulated
 clinical workflows.
 
+## When To Use It
+
+Use DICOMForge when you need:
+
+- typed, dependency-light DICOM metadata handling
+- pixel metadata validation before decoding or processing
+- de-identification planning with deterministic UID remapping and audit reports
+- pydicom-backed file IO behind a smaller application API
+- DICOMweb URL/query, DICOM JSON, STOW multipart, and response parsing helpers
+- async lifecycle and backpressure primitives for DICOM-like service design
+
+Do not use DICOMForge as the only component for:
+
+- diagnostic interpretation or medical-device behavior
+- legal de-identification approval without site policy and human review
+- direct DIMSE/PACS interoperability over the DICOM Upper Layer
+- full-fidelity DICOM editing that requires every VR, character set, and IOD rule
+- replacing pydicom, pynetdicom, or integration-tested PACS/VNA validation
+
+## Architecture At A Glance
+
+```text
+dicomforge.tags            typed tag parsing and common keyword constants
+dicomforge.dataset         lightweight mutable dataset wrapper
+dicomforge.transfer_syntax transfer syntax classification
+dicomforge.codecs          codec capability registry
+dicomforge.pixels          pixel metadata safety checks and small value helpers
+dicomforge.anonymize       starter de-identification plans and audit reports
+dicomforge.io              optional pydicom read/write adapter
+dicomforge.network         async command lifecycle primitives, not DICOM UL PDUs
+dicomforge.dicomweb        QIDO/WADO/STOW helpers with injectable HTTP transport
+```
+
+## API Stability
+
+DICOMForge is pre-1.0. Public APIs are intended to be small and stable, but
+breaking changes may happen while the library moves toward a 1.0 adoption bar.
+Breaking changes should be documented in release notes and paired with migration
+guidance.
+
 ## Quick Start
 
 ```python
@@ -158,6 +198,9 @@ python -m compileall -q src tests
 ```
 
 Examples live in [examples](examples).
+
+For a fuller commercial workflow, see
+[examples/end_to_end_workflow.py](examples/end_to_end_workflow.py).
 
 ## License
 

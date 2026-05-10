@@ -9,3 +9,9 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+#documentation
+paper.md
+paper.bib
+citation.cff
+
